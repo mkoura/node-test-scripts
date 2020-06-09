@@ -8,7 +8,7 @@ CWD="${PWD}"
 
 #signing_key=${root_addresses_dir}/user1.skey
 #from_address=$(cat ${root_addresses_dir}/user1.addr)
-amount=100000000000
+amount=1
 
 # Lets create counter file that will keep the number of how many times this script was ran
 # ran == how many addresses were created. It  will be used to create separate directories for each
@@ -213,9 +213,9 @@ fi
 
 # Wait for some time
 
-echo -e "\nINFO: Waiting for 5 seconds ..."
+echo -e "\nINFO: Waiting for the tx to be included into a block ..."
 
-sleep 5
+wait_for_new_tip
 
 echo -e "\nINFO: Showing balance for destination address after submitting TX ..."
 
