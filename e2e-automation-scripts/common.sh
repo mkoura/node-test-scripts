@@ -88,22 +88,22 @@ get_balance_for_tx () {
 }
 
 wait_for_new_tip () {
-	local timeout_no_of_slots=200
+    local timeout_no_of_slots=200
     local counter=$((${slotLength} * ${timeout_no_of_slots}))
-	initialTip=$(get_current_tip)
+    initialTip=$(get_current_tip)
+    actualTip=$(get_current_tip)
+    echo "INFO: initialSlotNo: ${initialTip}" > /dev/tty
+    
+    while [ "${actualTip}" = "${initialTip}" ]; do
+        sleep ${slotLength}
 	actualTip=$(get_current_tip)
-	echo "INFO: initialSlotNo: ${initialTip}"
-
-	while [ "${actualTip}" = "${initialTip}" ]; do
-		sleep ${slotLength}
-		actualTip=$(get_current_tip)
-		counter=$((counter - 1))
-		if [ ${counter} -lt 2 ]; then
-			echo "ERROR: Waited ${counter} secs but no new block was created"
-			exit 1
-		fi
-	done
-	echo "INFO: New block was created; newSlotNo: ${actualTip}"
+	counter=$((counter - 1))
+	if [ ${counter} -lt 2 ]; then
+	    echo "ERROR: Waited ${counter} secs but no new block was created" > /dev/tty
+	    exit 1
+	fi
+    done
+    echo "INFO: New block was created; newSlotNo: ${actualTip}" > /dev/tty
 }
 
 exec "$@"
