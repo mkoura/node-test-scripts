@@ -8,6 +8,8 @@ export root_addresses_dir=example/addresses
 export pool_1_dir=example/node-pool1
 export signing_key=${root_addresses_dir}/user1.skey
 export from_address=$(cat ${root_addresses_dir}/user1.addr)
+# TO DO: to get the slotLength from the protocol_params_file once it will be added there (or from genesis)
+export slotLength=1
 
 if [ -f "${counter_file}" ]; then
     counter_value=$(cat "${counter_file}")
@@ -83,6 +85,25 @@ get_balance_for_tx () {
     local balance=$3
     echo ${balance}
     exit 0
+}
+
+wait_for_new_tip () {
+    local timeout_no_of_slots=200
+    local counter=$((${slotLength} * ${timeout_no_of_slots}))
+    initialTip=$(get_current_tip)
+    actualTip=$(get_current_tip)
+    echo "INFO: initialSlotNo: ${initialTip}" > /dev/tty
+    
+    while [ "${actualTip}" = "${initialTip}" ]; do
+        sleep ${slotLength}
+	actualTip=$(get_current_tip)
+	counter=$((counter - 1))
+	if [ ${counter} -lt 2 ]; then
+	    echo "ERROR: Waited ${counter} secs but no new block was created" > /dev/tty
+	    exit 1
+	fi
+    done
+    echo "INFO: New block was created; newSlotNo: ${actualTip}" > /dev/tty
 }
 
 exec "$@"
