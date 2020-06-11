@@ -393,4 +393,156 @@ assert_address_balance () {
     exit 0
 }
 
+# Expects 4 input params:
+# 1) source address - source address
+# 2) destination address - destination address
+# 3) amount transferred - amount [LOVELACE or ALL] to be transfered from source_address to destination_addresses
+# 3.1) if amount_transferred = ALL, it will send all the funds (minus tx_fees) from source address to destination address
+# 4) signing key - signing key of the source address
+
+send_funds () {
+	# TO DO: to try to use more UTXOs when there are not enough funds into 1 UTXO
+    _check_number_of_arguments 4 '1) source address' '2) destination address' '3) amount transferred' '4) signing key'
+
+	# creating tmp_tx folder to keep the tx files until they are submitted
+	if [ -d $root_dirpath/tmp_txs ]; then
+		rm -Rf $root_dirpath/tmp_txs
+	else
+		mkdir $root_dirpath/tmp_txs
+	fi
+
+	raw_tx_filepath=$root_dirpath/tmp_txs/tx-body.raw
+	signed_tx_filepath=$root_dirpath/tmp_txs/tx-body.signed
+
+	local src_address=$1
+	local dst_address=$2
+	local amount_transferred=$3
+	local signing_key=$4
+	local tx_out_count=2
+
+	# Determine TTL
+	info_msg "Calculating the TTL for the raw TX ..."
+	current_tip=$(get_current_tip)
+
+	if [ $? != 0 ]; then
+		error_msg "Error when getting current tip"
+		exit 1
+	fi
+
+	ttl=$(calculate_ttl)
+
+	# Get current protocol params and write it to file
+	$(get_protocol_params)
+
+	if [ $?	!= 0 ]; then
+		error_msg "Error when obtaining protocol parameters"
+		exit 1
+	fi
+
+	# Calculate fee
+	info_msg "Calculating the fee for the raw TX ..."
+	if [ $amount_transferred == "ALL" ]; then
+		tx_out_count=1
+	fi
+
+	fee=$(cardano-cli shelley transaction calculate-min-fee \
+		--tx-in-count 1 \
+		--tx-out-count $tx_out_count \
+		--ttl $ttl \
+		--testnet-magic $testnet_magic \
+		--signing-key-file $signing_key \
+		--protocol-params-file $protocol_params_filepath \
+		| awk '{ print $2}')
+
+	if [ $? != 0 ]; then
+		error_msg "Error during fee calculation"
+		exit 1
+	fi
+
+	info_msg "Current tip: $current_tip"
+	info_msg "Tx ttl: $ttl"
+
+	# Build TX
+	tx=$(get_tx_info_for_address $src_address)
+	input=$(get_input_for_tx $tx)
+	balance=$(get_balance_for_tx $tx)
+	if [ $amount_transferred == "ALL" ]; then
+		amount_transferred=$(( balance - fee ))
+	fi
+	change=$(( balance - fee - amount_transferred ))
+
+	info_msg "Source address: $src_address"
+	info_msg "Destination address: $dst_address"
+	info_msg "TX Input: $input"
+	info_msg "Source address balance (before): $balance"
+	info_msg "Amount trasfered: $amount_transferred"
+	info_msg "Tx fee: $fee"
+	info_msg "Source address balance (after): $change"
+
+	if (( change < 0 )); then
+		warn_msg "Not enough funds; change: $change"
+	fi
+
+	info_msg "Sending $amount_transferred LOVELACE from $src_address to $dst_address"
+
+	info_msg "Building raw TX ..."
+
+	if [ $amount_transferred == "ALL" ]; then
+		cardano-cli shelley transaction build-raw \
+			--ttl $ttl \
+			--fee $fee \
+			--tx-in $input \
+			--tx-out "${dst_address}+${amount_transferred}" \
+			--out-file $raw_tx_filepath
+	else
+		cardano-cli shelley transaction build-raw \
+			--ttl $ttl \
+			--fee $fee \
+			--tx-in $input \
+			--tx-out "${dst_address}+${amount_transferred}" \
+			--tx-out "${src_address}+${change}" \
+			--out-file $raw_tx_filepath
+	fi
+
+	# ISSUE with incorrect return code = 1 for success
+	if [ $?	== 1 ]; then
+		error_msg "Error when building raw transaction"
+		exit 1
+	fi
+
+	# Sign TX
+	info_msg "Signing TX ..."
+
+	cardano-cli shelley transaction sign \
+		--signing-key-file $signing_key \
+		--testnet-magic $testnet_magic \
+		--tx-body-file $raw_tx_filepath \
+		--out-file $signed_tx_filepath
+
+	# ISSUE with incorrect return code = 1 for success
+	if [ $?	== 1 ]; then
+		error_msg "Error when signing transaction"
+		exit 1
+	fi
+
+	# Submit TX
+	info_msg "Submitting TX ..."
+
+	cardano-cli shelley transaction submit \
+		--tx-file "${signed_tx_filepath}" \
+		--testnet-magic "${testnet_magic}"
+
+	# ISSUE with incorrect return code = 1 for success
+	if [ $?	== 1 ]; then
+		error_msg "Error when submitting transaction"
+		exit 1
+	fi
+
+	# Cleanup - remove the tmp_tx folder/files
+	if [ -d $root_dirpath/tmp_txs ]; then
+		rm -Rf $root_dirpath/tmp_txs
+	fi
+}
+
+
 exec "$@"
