@@ -249,6 +249,57 @@ calculate_ttl () {
     exit 0
 }
 
+# Returns all the UTXOs for the specified address
+# Expects 1 input param - an address number
+
+get_utxos_for_address () {
+    _check_number_of_arguments 1 '1) Shelley payment address'
+    local query_address=$1
+    local all_utxos=$(cardano-cli shelley query utxo --testnet-magic $testnet_magic --address $query_address | grep "^[^- ]")
+
+    if [ $? != 0 ]; then
+        error_msg "Error when performing query utxo on $query_address"
+        exit 1
+    fi
+
+    echo "${all_utxos}"
+    exit 0
+}
+
+# Returns the number of UTXOs for the specified address
+# Expects 1 input param - an address number
+
+get_no_of_utxos_for_address () {
+    _check_number_of_arguments 1 '1) Shelley payment address'
+    local query_address=$1
+    local all_utxos=$(get_utxos_for_address $query_address)
+
+	readarray -t utxo_array <<<"$all_utxos"
+
+	echo ${#utxo_array[@]}
+    exit 0
+}
+
+# Returns the balance of the specified address (the sum of all UTXOs of the specified address)
+# Expects 1 input param - an address number
+
+get_address_balance () {
+    _check_number_of_arguments 1 '1) Shelley payment address'
+	local query_address=$1
+	local all_utxos=$(get_utxos_for_address $query_address)
+	local balance=0
+
+	readarray -t utxo_array <<<"$all_utxos"
+
+	for utxo_string in "${utxo_array[@]}"; do
+		utxo_amount=$(echo $utxo_string | cut -d' ' -f3)
+		balance=$(( balance + utxo_amount))
+	done
+
+	echo $balance
+    exit 0
+}
+
 # Expects 1 input param - an actual address number
 
 get_tx_info_for_address () {
@@ -370,14 +421,8 @@ assert_address_balance () {
 
     local query_address=$1
     local expected_balance=$2
-    local address_details=$(check_address_details $query_address)
 
-    if [ $? != 0 ]; then
-        error_msg "Error when checking address details"
-        exit 2
-    fi
-
-    local actual_balance=$(get_balance_for_tx $address_details)
+    local actual_balance=$(get_address_balance $query_address)
 
     if [ $? != 0 ]; then
         error_msg "Error when obtaining address balance"
@@ -393,6 +438,7 @@ assert_address_balance () {
     exit 0
 }
 
+# Sends funds from 1 payment address to 1 payment address
 # Expects 4 input params:
 # 1) source address - source address
 # 2) destination address - destination address
@@ -401,7 +447,6 @@ assert_address_balance () {
 # 4) signing key - signing key of the source address
 
 send_funds () {
-	# TO DO: to try to use more UTXOs when there are not enough funds into 1 UTXO
     _check_number_of_arguments 4 '1) source address' '2) destination address' '3) amount transferred' '4) signing key'
 
 	# creating tmp_tx folder to keep the tx files until they are submitted
@@ -418,10 +463,10 @@ send_funds () {
 	local dst_address=$2
 	local amount_transferred=$3
 	local signing_key=$4
+	local tx_in_count=1
 	local tx_out_count=2
 
 	# Determine TTL
-	info_msg "Calculating the TTL for the raw TX ..."
 	current_tip=$(get_current_tip)
 
 	if [ $? != 0 ]; then
@@ -439,8 +484,10 @@ send_funds () {
 		exit 1
 	fi
 
+	# Get the number of UTXOs available in the source address
+	no_of_utxos=$(get_no_of_utxos_for_address $src_address)
+
 	# Calculate fee
-	info_msg "Calculating the fee for the raw TX ..."
 	if [ $amount_transferred == "ALL" ]; then
 		tx_out_count=1
 	fi
@@ -459,49 +506,127 @@ send_funds () {
 		exit 1
 	fi
 
-	info_msg "Current tip: $current_tip"
-	info_msg "Tx ttl: $ttl"
+	# Get UTXOs from source address (to be used into the actual transaction)
+	local src_utxos=$(get_utxos_for_address $src_address)
+	local highest_amount_utxo=0
+	local utxo_no=0
+	local counter=0
 
-	# Build TX
-	tx=$(get_tx_info_for_address $src_address)
-	input=$(get_input_for_tx $tx)
-	balance=$(get_balance_for_tx $tx)
+	# Create an array with all the utxos from the source address
+	readarray -t utxo_array <<<"$src_utxos"
+
+	# Get the value and array_index of the UTXO with the biggest amount of LOVELACE
+	for utxo_string in "${utxo_array[@]}"; do
+		utxo_amount=$(echo $utxo_string | cut -d' ' -f3)
+		if (( utxo_amount >= highest_amount_utxo )); then
+			highest_amount_utxo=$utxo_amount
+			utxo_no=$counter
+		fi
+		counter=$(( counter + 1 ))
+	done
+
+	highest_amount_utxo=${utxo_array[$utxo_no]}
+	highest_utxo_amount_balance=$(get_balance_for_tx $highest_amount_utxo)
+	addr_balance=$(get_address_balance $src_address)
 	if [ $amount_transferred == "ALL" ]; then
-		amount_transferred=$(( balance - fee ))
+		amount_transferred=$(( addr_balance - fee ))
 	fi
-	change=$(( balance - fee - amount_transferred ))
 
-	info_msg "Source address: $src_address"
-	info_msg "Destination address: $dst_address"
-	info_msg "TX Input: $input"
-	info_msg "Source address balance (before): $balance"
-	info_msg "Amount trasfered: $amount_transferred"
-	info_msg "Tx fee: $fee"
-	info_msg "Source address balance (after): $change"
+	change=$(( highest_utxo_amount_balance - fee - amount_transferred ))
 
+	# If there are not enough funds into the UTXO with the highest amount but
+	# If the address balance (all UTXOs) contains enough funds, use all UTXOs as input into the tx
 	if (( change < 0 )); then
-		warn_msg "Not enough funds; change: $change"
+		warn_msg "Not enough funds into the highest UTXO amout; change (utxo): $change"
+		tx_in_count=$no_of_utxos
+		fee=$(cardano-cli shelley transaction calculate-min-fee \
+			--tx-in-count $tx_in_count \
+			--tx-out-count $tx_out_count \
+			--ttl $ttl \
+			--testnet-magic $testnet_magic \
+			--signing-key-file $signing_key \
+			--protocol-params-file $protocol_params_filepath \
+			| awk '{ print $2}')
+		change=$(( addr_balance - fee - amount_transferred ))
+		if (( change < 0 )); then
+			error_msg "Not enough funds; change (address): $change"
+		fi
+	fi
+
+	if (( tx_in_count == 1 )); then
+		input_utxo=$(get_input_for_tx $highest_amount_utxo)
+	else
+		input_utxo="${utxo_array[@]}"
 	fi
 
 	info_msg "Sending $amount_transferred LOVELACE from $src_address to $dst_address"
+	info_msg "------------------------------------------------------------"
+	info_msg "Current tip: $current_tip"
+	info_msg "Tx ttl: $ttl"
+	info_msg "Source address: $src_address"
+	info_msg "Destination address: $dst_address"
+	info_msg "No of source UTXOs: $no_of_utxos"
+	info_msg "Highest source UTXO amount: $highest_amount_utxo"
+	info_msg "Input UTXO: $input_utxo"
+	info_msg "Source address selected UTXO balance (before): $highest_utxo_amount_balance"
+	info_msg "Source address balance (before): $addr_balance"
+	info_msg "Amount trasfered: $amount_transferred"
+	info_msg "Tx fee: $fee"
+	info_msg "Source address balance (after): $change"
+	info_msg "------------------------------------------------------------"
 
+	# Build TX
 	info_msg "Building raw TX ..."
-
-	if [ $amount_transferred == "ALL" ]; then
-		cardano-cli shelley transaction build-raw \
-			--ttl $ttl \
-			--fee $fee \
-			--tx-in $input \
-			--tx-out "${dst_address}+${amount_transferred}" \
-			--out-file $raw_tx_filepath
+	if (( tx_in_count == 1 )); then
+		if [ $amount_transferred == "ALL" ]; then
+			cardano-cli shelley transaction build-raw \
+				--ttl $ttl \
+				--fee $fee \
+				--tx-in $input_utxo \
+				--tx-out "${dst_address}+${amount_transferred}" \
+				--out-file $raw_tx_filepath
+		else
+			cardano-cli shelley transaction build-raw \
+				--ttl $ttl \
+				--fee $fee \
+				--tx-in $input_utxo \
+				--tx-out "${dst_address}+${amount_transferred}" \
+				--tx-out "${src_address}+${change}" \
+				--out-file $raw_tx_filepath
+		fi
 	else
-		cardano-cli shelley transaction build-raw \
-			--ttl $ttl \
-			--fee $fee \
-			--tx-in $input \
-			--tx-out "${dst_address}+${amount_transferred}" \
-			--tx-out "${src_address}+${change}" \
-			--out-file $raw_tx_filepath
+		if [ $amount_transferred == "ALL" ]; then
+			local counter=0
+			# Create the tx_in array with all the --tx-in parameters for the build-raw command
+			for utxo_string in "${utxo_array[@]}"; do
+				tx_hash=$(echo $utxo_string | cut -d' ' -f1)
+				tx_ix=$(echo $utxo_string | cut -d' ' -f2)
+				tx_in[counter]=$(echo "--tx-in $tx_hash#$tx_ix ")
+				counter=$(( counter + 1 ))
+			done
+			cardano-cli shelley transaction build-raw \
+				--ttl $ttl \
+				--fee $fee \
+				${tx_in[@]} \
+				--tx-out "${dst_address}+${amount_transferred}" \
+				--out-file $raw_tx_filepath
+		else
+			local counter=0
+			# Create the tx_in array with all the --tx-in parameters for the build-raw command
+			for utxo_string in "${utxo_array[@]}"; do
+				tx_hash=$(echo $utxo_string | cut -d' ' -f1)
+				tx_ix=$(echo $utxo_string | cut -d' ' -f2)
+				tx_in[counter]=$(echo "--tx-in $tx_hash#$tx_ix ")
+				counter=$(( counter + 1 ))
+			done
+			cardano-cli shelley transaction build-raw \
+				--ttl $ttl \
+				--fee $fee \
+				${tx_in[@]} \
+				--tx-out "${dst_address}+${amount_transferred}" \
+				--tx-out "${src_address}+${change}" \
+				--out-file $raw_tx_filepath
+		fi
 	fi
 
 	# ISSUE with incorrect return code = 1 for success
