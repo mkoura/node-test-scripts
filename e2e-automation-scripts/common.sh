@@ -558,6 +558,7 @@ send_funds () {
 		change=$(( src_addr_balance - fee - amount_transferred ))
 		if (( change < 0 )); then
 			error_msg "Not enough funds; change (address): $change"
+			exit 1
 		fi
 	fi
 
