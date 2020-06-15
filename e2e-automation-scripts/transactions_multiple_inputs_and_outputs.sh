@@ -2,9 +2,9 @@
 
 # Scenario:
 #	1. create 2 addresses (only with payment keys) - addr1 and addr2
-#	2. send 100000 Lovelace from user1.addr (embeded into genesis / faucet) to one of the addresses created above (addr1)
-#	3. send all the funds from addr1 to addr2 (1 tx_input and 1 tx_output)
-#	4. check that the balances were correctly updated 
+#	2. send 5 transactions of 100 Lovelace from user1 (the faucet) to addr1 ($addr1) - 5 different UTXOs in addr1
+#	3. send 210 Lovelace from addr1 ($addr1) to addr2 ($addr2) (multiple input UTXOs)
+#	4. send all the remaining funds from addr1 ($addr1) to addr2 ($addr2) (multiple input UTXOs)
 
 # Current working dir: cardano-node
 
@@ -111,23 +111,6 @@ for i in {0..4}; do
 		error_msg "Error when sending funds from user1 to addr1"
 		exit 1
 	fi
-
-	# Wait for some time
-
-	info_msg "Waiting for the tx to be included into a block ..."
-
-	wait_for_new_tip
-
-	# Check the balance of the destination address (addr1)
-
-	info_msg "Checking the balance of the destination address (addr1 = $addr1) ..."
-		
-	# $(assert_address_balance $to_address $((tx_amount * i)))
-
-	# if [ $?	!= 0 ]; then
-		# error_msg "Error when asserting balance of addr1 ($addr1) - ($i) "
-		# exit 1
-	# fi
 done
 
 # Send 210 Lovelace from addr1 ($addr1) to addr2 ($addr2)
@@ -138,10 +121,19 @@ from_address=$payment_address1
 to_address=$payment_address2
 signing_key=$payment_signing_keypath1
 
-# aa=$(get_utxos_for_address $from_address)
-# echo "$aa"
+send_funds $from_address $to_address $tx_amount $signing_key
 
-info_msg "============ Sending $tx_amount Lovelace from addr1 ($addr1) to addr2 ($addr2)"
+if [ $?	!= 0 ]; then
+	error_msg "Error when sending funds from user1 to addr1"
+	exit 1
+fi
+
+# Send all the remaining funds from addr1 ($addr1) to addr2 ($addr2)
+
+tx_amount="ALL"
+from_address=$payment_address1
+to_address=$payment_address2
+signing_key=$payment_signing_keypath1
 
 send_funds $from_address $to_address $tx_amount $signing_key
 
@@ -150,15 +142,3 @@ if [ $?	!= 0 ]; then
 	exit 1
 fi
 
-# $(assert_address_balance $to_address $((tx_amount * i)))
-
-# if [ $?	!= 0 ]; then
-	# error_msg "Error when asserting balance of addr1 ($addr1) - ($i) "
-	# exit 1
-# fi
-
-TO DO: check the source and destination balance
-
-TO DO: send ALL remaining funds from addr1 to addr2
-
-TO DO: check the source and destination balance

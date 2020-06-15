@@ -444,13 +444,15 @@ assert_address_balance () {
 # 2) destination address - destination address
 # 3) amount transferred - amount [LOVELACE or ALL] to be transfered from source_address to destination_addresses
 # 3.1) if amount_transferred = ALL, it will send all the funds (minus tx_fees) from source address to destination address
+# 3.2) if there are not enough funds in the UTXO with the highest amount (of the source address), but there are enough funds
+# into the address, all the UTXOs of the source address will be used into the trasaction
 # 4) signing key - signing key of the source address
 
 send_funds () {
     _check_number_of_arguments 4 '1) source address' '2) destination address' '3) amount transferred' '4) signing key'
 
 	# creating tmp_tx folder to keep the tx files until they are submitted
-	if [ -d $root_dirpath/tmp_txs ]; then
+	if [ -d $root_dirpath/tmp_txs ]; then 
 		rm -Rf $root_dirpath/tmp_txs
 	else
 		mkdir $root_dirpath/tmp_txs
@@ -487,6 +489,11 @@ send_funds () {
 	# Get the number of UTXOs available in the source address
 	no_of_utxos=$(get_no_of_utxos_for_address $src_address)
 
+	if [ $? != 0 ]; then
+		error_msg "Error while getting the number of UTXOs for address: $src_address"
+		exit 1
+	fi
+	
 	# Calculate fee
 	if [ $amount_transferred == "ALL" ]; then
 		tx_out_count=1
@@ -513,9 +520,9 @@ send_funds () {
 	local counter=0
 
 	# Create an array with all the utxos from the source address
-	readarray -t utxo_array <<<"$src_utxos"
+	readarray -t utxo_array <<<"$src_utxos"	
 
-	# Get the value and array_index of the UTXO with the biggest amount of LOVELACE
+	# Get the value and array_index of the UTXO with the highest amount of LOVELACE
 	for utxo_string in "${utxo_array[@]}"; do
 		utxo_amount=$(echo $utxo_string | cut -d' ' -f3)
 		if (( utxo_amount >= highest_amount_utxo )); then
@@ -527,14 +534,15 @@ send_funds () {
 
 	highest_amount_utxo=${utxo_array[$utxo_no]}
 	highest_utxo_amount_balance=$(get_balance_for_tx $highest_amount_utxo)
-	addr_balance=$(get_address_balance $src_address)
+	src_addr_balance=$(get_address_balance $src_address)
+	dst_addr_balance=$(get_address_balance $dst_address)
 	if [ $amount_transferred == "ALL" ]; then
-		amount_transferred=$(( addr_balance - fee ))
+		amount_transferred=$(( src_addr_balance - fee ))
 	fi
 
 	change=$(( highest_utxo_amount_balance - fee - amount_transferred ))
 
-	# If there are not enough funds into the UTXO with the highest amount but
+	# If there are not enough funds into the UTXO with the highest amount but 
 	# If the address balance (all UTXOs) contains enough funds, use all UTXOs as input into the tx
 	if (( change < 0 )); then
 		warn_msg "Not enough funds into the highest UTXO amout; change (utxo): $change"
@@ -547,7 +555,7 @@ send_funds () {
 			--signing-key-file $signing_key \
 			--protocol-params-file $protocol_params_filepath \
 			| awk '{ print $2}')
-		change=$(( addr_balance - fee - amount_transferred ))
+		change=$(( src_addr_balance - fee - amount_transferred ))
 		if (( change < 0 )); then
 			error_msg "Not enough funds; change (address): $change"
 		fi
@@ -568,15 +576,16 @@ send_funds () {
 	info_msg "No of source UTXOs: $no_of_utxos"
 	info_msg "Highest source UTXO amount: $highest_amount_utxo"
 	info_msg "Input UTXO: $input_utxo"
+	info_msg "Destination address balance (before): $dst_addr_balance"
+	info_msg "Source address balance (before): $src_addr_balance"
 	info_msg "Source address selected UTXO balance (before): $highest_utxo_amount_balance"
-	info_msg "Source address balance (before): $addr_balance"
 	info_msg "Amount trasfered: $amount_transferred"
 	info_msg "Tx fee: $fee"
 	info_msg "Source address balance (after): $change"
 	info_msg "------------------------------------------------------------"
-
+	
 	# Build TX
-	info_msg "Building raw TX ..."
+	info_msg "Building raw TX ..."	
 	if (( tx_in_count == 1 )); then
 		if [ $amount_transferred == "ALL" ]; then
 			cardano-cli shelley transaction build-raw \
@@ -664,9 +673,34 @@ send_funds () {
 	fi
 
 	# Cleanup - remove the tmp_tx folder/files
-	if [ -d $root_dirpath/tmp_txs ]; then
+	if [ -d $root_dirpath/tmp_txs ]; then 
 		rm -Rf $root_dirpath/tmp_txs
 	fi
+	
+	# Wait for some time
+	info_msg "Waiting for the tx to be included into a block ..."
+	wait_for_new_tip
+	# sometimes the address balances are not updated imediatelly after 1 new tip
+	wait_for_new_tip
+	
+	# Check the balances
+	info_msg "Checking the balance of the destination address..."
+	
+	$(assert_address_balance $dst_address $(( dst_addr_balance + amount_transferred)))
+
+	if [ $?	!= 0 ]; then
+		error_msg "Error when asserting the balance of the destination address"
+		exit 1
+	fi
+	
+	info_msg "Checking the balance of the source address..."
+
+	$(assert_address_balance $src_address $(( src_addr_balance - fee - amount_transferred )))
+
+	if [ $?	!= 0 ]; then
+		error_msg "Error when asserting the balance of the source address"
+		exit 1
+	fi	
 }
 
 

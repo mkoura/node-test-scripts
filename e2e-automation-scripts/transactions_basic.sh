@@ -111,24 +111,6 @@ if [ $?	!= 0 ]; then
     exit 1
 fi
 
-# Wait for some time
-
-info_msg "Waiting for the tx to be included into a block ..."
-
-wait_for_new_tip 100
-
-# Check the balance of the destination address (addr1)
-
-info_msg "Checking the balance of the destination address (addr1 = $addr1) ..."
-
-$(assert_address_balance $to_address $tx_amount)
-
-if [ $?	!= 0 ]; then
-    error_msg "Error when asserting balance of addr1 ($addr1) "
-    exit 1
-fi
-
-
 # Send ALL funds from addr1 ($addr1) to addr2 ($addr2)
 tx_amount=ALL
 from_address=$payment_address1
@@ -144,19 +126,4 @@ if [ $?	!= 0 ]; then
     exit 1
 fi
 
-# Wait for some time
 
-info_msg "Waiting for the tx to be included into a block ..."
-
-wait_for_new_tip 100
-
-# Check the balance of the source address (addr1)
-
-info_msg "Checking the balance of the source address (addr1 = $addr1) ..."
-
-$(assert_address_balance $from_address 0)
-
-if [ $?	!= 0 ]; then
-    error_msg "Error when asserting balance of addr1 ($addr1) "
-    exit 1
-fi
