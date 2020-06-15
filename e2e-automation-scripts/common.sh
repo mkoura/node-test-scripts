@@ -274,9 +274,9 @@ get_no_of_utxos_for_address () {
     local query_address=$1
     local all_utxos=$(get_utxos_for_address $query_address)
 
-	readarray -t utxo_array <<<"$all_utxos"
+    readarray -t utxo_array <<<"$all_utxos"
 
-	echo ${#utxo_array[@]}
+    echo ${#utxo_array[@]}
     exit 0
 }
 
@@ -418,7 +418,6 @@ assert_address_balance () {
     _check_number_of_arguments 2 '1) actual address' '2) expected balance - natural number [ADA]'
 
     info_msg "Asserting address balance ..."
-
     local query_address=$1
     local expected_balance=$2
 
