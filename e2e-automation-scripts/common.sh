@@ -62,6 +62,25 @@ success_msg() {
     printf "${green}SUCCESS:${color_reset} ${@} \n" > /dev/tty
 }
 
+# Expects 1 argument - number of characters to generate
+
+get_random_hex_string () {
+    local number_of_chars=$1
+    local random_hex_string=$(tr -dc 'a-f0-9' < /dev/urandom | head -c$number_of_chars)
+
+    echo $random_hex_string
+}
+
+# No arguments expected
+
+get_random_payment_address () {
+    local header=00 # 8 bit shelley payment address header
+    local random_hex_string=$(get_random_hex_string 129) # remaining part of address
+    local random_address="$header$random_hex_string"
+
+    echo $random_address
+}
+
 # Checks if required number of arguments were passed to function - private internal for common.sh function
 # Expects:
 # 1) input param - number of required arguments [natural > 0]
