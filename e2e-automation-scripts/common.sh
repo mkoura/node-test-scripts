@@ -528,10 +528,10 @@ send_funds () {
 	raw_tx_filepath=$root_dirpath/tmp_txs/tx-body.raw
 	signed_tx_filepath=$root_dirpath/tmp_txs/tx-body.signed
 
-	local -n src_address=$1
-	local -n dst_address=$2
-	local -n amount_transferred=$3
-	local -n signing_key=$4
+	local src_address=$1
+	local dst_address=$2
+	local amount_transferred=$3
+	local signing_key=$4
 
 	echo "+++++++++++++++++++++++++++++++++++++++++++++"
 

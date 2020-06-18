@@ -17,9 +17,11 @@ CWD=$PWD
 # ran == how many addresses were created. It  will be used to create separate directories for each
 # new key pair / addresses
 
-# Create init variables, directory, payment keys and address for the first address (addr1)
+no_of_addresses_to_be_created=3
+
+echo "========================= Create $no_of_addresses_to_be_created key pairs and address ======================="
 counter=0
-for i in `seq 1 11`; do
+for i in `seq 1 $no_of_addresses_to_be_created`; do
 	check_address_counter_file
 
 	keys_dirpath=$addresses_root_dirpath/$address_counter_value
@@ -27,15 +29,14 @@ for i in `seq 1 11`; do
 	payment_verification_keypath=$keys_dirpath/${addr}.vkey
 	payment_signing_keypath=$keys_dirpath/${addr}.skey
 	payment_address_path=$keys_dirpath/${addr}.addr
-	
-	# add all addresses into an array
+
+	# add all created addresses into an array (in the form of: ( user10, user11, user12) )
 	created_users_aray[$counter]=$addr
 
 	info_msg "Creating directory: $keys_dirpath for payment key pair and address files ..."
 	mkdir -p $keys_dirpath
 
 	info_msg "Creating payment address keys for $addr ..."
-
 	cardano-cli shelley address key-gen \
 		--verification-key-file $payment_verification_keypath \
 		--signing-key-file $payment_signing_keypath
@@ -46,7 +47,6 @@ for i in `seq 1 11`; do
 	fi
 
 	info_msg "Building payment address for $addr ..."
-
 	cardano-cli shelley address build \
 		--payment-verification-key-file $payment_verification_keypath \
 		--testnet-magic $testnet_magic \
@@ -59,16 +59,18 @@ for i in `seq 1 11`; do
 	counter=$(( counter + 1 ))
 done
 
-info_msg "${#created_users_aray[@]} payment addresses created: ${created_users_aray[@]}"
+# info_msg "${#created_users_aray[@]} payment addresses created: ${created_users_aray[@]}"
+# TO DO: info_msg is printing only the first element of array
+echo "${#created_users_aray[@]} payment addresses created: ${created_users_aray[@]}"
 
-info_msg "============ Send 100 transactions of 10 Lovelace each from user1 (the faucet) to ${created_users_aray[0]}"
-dst_address=${created_users_aray[0]}
-user_number=$(get_user_number ${dst_address})
+info_msg "============ Send $no_of_addresses_to_be_created transactions of 10 Lovelace each from user1 (the faucet) to ${created_users_aray[0]}"
+dst_user=${created_users_aray[0]}
+dst_user_number=$(get_user_number ${dst_user})
 
-for i in `seq 1 10`; do
+for i in `seq 1 $no_of_addresses_to_be_created`; do
 	tx_amount=10
 	from_address=$user1_payment_address
-	to_address=$(cat $addresses_root_dirpath/$user_number/$dst_address.addr)
+	to_address=$(cat $addresses_root_dirpath/$dst_user_number/$dst_user.addr)
 	signing_key=$user1_payment_signing_keypath
 
 	info_msg "============ Sending $tx_amount Lovelace from $from_address (faucet) to $to_address - ($i)"
@@ -81,22 +83,23 @@ for i in `seq 1 10`; do
 	fi
 done
 
-info_msg "============ Send 9 Lovelace from addr1 (${created_users_aray[0]})) to addr2...101 (${created_users_aray[1]} - ${created_users_aray[100]})"
+info_msg "============ Send 9 Lovelace from (${created_users_aray[0]})) to (${created_users_aray[1]} - ${created_users_aray[$((no_of_addresses_to_be_created - 1))]})"
 tx_amount_per_dst=9
-from_address=${created_users_aray[0]}
-signing_key=$payment_signing_keypath1
+src_user=${created_users_aray[0]}
+src_user_number=$(get_user_number ${src_user})
+from_address=$(cat $addresses_root_dirpath/$src_user_number/$src_user.addr)
+signing_key=$addresses_root_dirpath/$src_user_number/$from_address.skey
 
-counter=0
-for user in "${created_users_aray[@]}"; do
-	to_address_array[counter]=${created_users_aray[$(( counter + 1 ))]}
-	tx_amount_array[counter]=$tx_amount_per_dst
-	counter=$(( counter + 1 ))
+for count in `seq 1 $((${#created_users_aray[@]} - 1))`; do
+	to_address_array[$count]=${created_users_aray[$count]}
+	tx_amount_array[$count]=$tx_amount_per_dst
 done
 
-
-echo "from_address: $from_address"
-echo "to_address_array: ${to_address_array[@]}"
-
+echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+echo "from_address (on script): $from_address"
+echo "to_address_array (on script): ${to_address_array[@]}"
+echo "tx_amount_array (on script): ${tx_amount_array[@]}"
+echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 
 send_funds $from_address ${to_address_array[@]} ${tx_amount_array[@]} $signing_key
 
