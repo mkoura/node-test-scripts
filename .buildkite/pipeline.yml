@@ -1,9 +1,7 @@
 steps:
 
   - label: 'Run script'
-    commands:
-      - ./node-sync-test.sh
+    command:
+      - ./ta-shelley.sh
     artifact_paths:
       - "results.log"
-    agents:
-      system: x86_64-linux

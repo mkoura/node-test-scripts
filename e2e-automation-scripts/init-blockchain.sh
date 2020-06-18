@@ -342,6 +342,7 @@ done
 tmux select-pane -t 3
 tmux send-keys -t "$session_name" "./e2e-automation-scripts/submit-initial-blockchain-transaction.sh" C-m
 tmux send-keys -t "$session_name" "sleep 5; ./e2e-automation-scripts/tests-runner.sh" C-m
+tmux send-keys -t "$session_name" "sleep 5; ./e2e-automation-scripts/analyse-results.sh" C-m
 
 # For debugging: attach session
 # tmux attach -t "$session_name"

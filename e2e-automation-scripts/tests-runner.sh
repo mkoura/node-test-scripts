@@ -4,7 +4,7 @@ echo "======================== test-runner.sh ========================" 2>&1 | t
 
 # List of test scripts to run:
 
-./e2e-automation-scripts/transaction-with-no-existing-input-address.sh 2>&1 | tee -a output.log
+./e2e-automation-scripts/transaction-with-no-existing-input-address.sh 2>&1 >> output.log
 echo "transaction-with-no-existing-input-address.sh:${PIPESTATUS[0]}" >> tests-results.txt
 
 ./e2e-automation-scripts/transaction-with-no-existing-output-address.sh 2>&1 | tee -a output.log
