@@ -60,6 +60,25 @@ success_msg() {
     printf "${green}SUCCESS:${color_reset} ${@} \n" > /dev/tty
 }
 
+# Expects 1 argument - number of characters to generate
+
+get_random_hex_string () {
+    local number_of_chars=$1
+    local random_hex_string=$(tr -dc 'a-f0-9' < /dev/urandom | head -c$number_of_chars)
+
+    echo $random_hex_string
+}
+
+# No arguments expected
+
+get_random_payment_address () {
+    local header=00 # 8 bit shelley payment address header
+    local random_hex_string=$(get_random_hex_string 129) # remaining part of address
+    local random_address="$header$random_hex_string"
+
+    echo $random_address
+}
+
 # Checks if required number of arguments were passed to function - private internal for common.sh function
 # Expects:
 # 1) input param - number of required arguments [natural > 0]
@@ -451,7 +470,7 @@ send_funds () {
     _check_number_of_arguments 4 '1) source address' '2) destination address' '3) amount transferred' '4) signing key'
 
 	# creating tmp_tx folder to keep the tx files until they are submitted
-	if [ -d $root_dirpath/tmp_txs ]; then 
+	if [ -d $root_dirpath/tmp_txs ]; then
 		rm -Rf $root_dirpath/tmp_txs
 	else
 		mkdir $root_dirpath/tmp_txs
@@ -492,7 +511,7 @@ send_funds () {
 		error_msg "Error while getting the number of UTXOs for address: $src_address"
 		exit 1
 	fi
-	
+
 	# Calculate fee
 	if [ $amount_transferred == "ALL" ]; then
 		tx_out_count=1
@@ -519,7 +538,7 @@ send_funds () {
 	local counter=0
 
 	# Create an array with all the utxos from the source address
-	readarray -t utxo_array <<<"$src_utxos"	
+	readarray -t utxo_array <<<"$src_utxos"
 
 	# Get the value and array_index of the UTXO with the highest amount of LOVELACE
 	for utxo_string in "${utxo_array[@]}"; do
@@ -541,7 +560,7 @@ send_funds () {
 
 	change=$(( highest_utxo_amount_balance - fee - amount_transferred ))
 
-	# If there are not enough funds into the UTXO with the highest amount but 
+	# If there are not enough funds into the UTXO with the highest amount but
 	# If the address balance (all UTXOs) contains enough funds, use all UTXOs as input into the tx
 	if (( change < 0 )); then
 		warn_msg "Not enough funds into the highest UTXO amout; change (utxo): $change"
@@ -583,9 +602,9 @@ send_funds () {
 	info_msg "Tx fee: $fee"
 	info_msg "Source address balance (after): $change"
 	info_msg "------------------------------------------------------------"
-	
+
 	# Build TX
-	info_msg "Building raw TX ..."	
+	info_msg "Building raw TX ..."
 	if (( tx_in_count == 1 )); then
 		if [ $amount_transferred == "ALL" ]; then
 			cardano-cli shelley transaction build-raw \
@@ -673,26 +692,26 @@ send_funds () {
 	fi
 
 	# Cleanup - remove the tmp_tx folder/files
-	if [ -d $root_dirpath/tmp_txs ]; then 
+	if [ -d $root_dirpath/tmp_txs ]; then
 		rm -Rf $root_dirpath/tmp_txs
 	fi
-	
+
 	# Wait for some time
 	info_msg "Waiting for the tx to be included into a block ..."
 	wait_for_new_tip
 	# sometimes the address balances are not updated imediatelly after 1 new tip
 	wait_for_new_tip
-	
+
 	# Check the balances
 	info_msg "Checking the balance of the destination address..."
-	
+
 	$(assert_address_balance $dst_address $(( dst_addr_balance + amount_transferred)))
 
 	if [ $?	!= 0 ]; then
 		error_msg "Error when asserting the balance of the destination address"
 		exit 1
 	fi
-	
+
 	info_msg "Checking the balance of the source address..."
 
 	$(assert_address_balance $src_address $(( src_addr_balance - fee - amount_transferred )))
@@ -700,7 +719,7 @@ send_funds () {
 	if [ $?	!= 0 ]; then
 		error_msg "Error when asserting the balance of the source address"
 		exit 1
-	fi	
+	fi
 }
 
 
