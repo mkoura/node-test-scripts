@@ -20,7 +20,7 @@ export user1_payment_address=$(cat $user1_payment_address_path)
 # create an alias from_address == user1_payment_address
 export from_address=$user1_payment_address
 
-
+exec 3>&1
 
 # Message colors
 
@@ -47,19 +47,19 @@ if [ -f $pool_counter_filepath ]; then
 fi
 
 error_msg() {
-    printf "${red}$(date +%F.%T) ${BASH_SOURCE[1]##*/} line ${BASH_LINENO[0]} ERROR: ${@}${color_reset} \n" > /dev/tty
+    printf "${red}$(date +%F.%T) ${BASH_SOURCE[1]##*/} line ${BASH_LINENO[0]} ERROR: ${@}${color_reset} \n" >&3
 }
 
 info_msg() {
-    printf "${blue}INFO:${color_reset} ${@} \n" > /dev/tty
+    printf "${blue}INFO:${color_reset} ${@} \n" >&3
 }
 
 warn_msg() {
-    printf "${yellow}WARNING:${color_reset} ${@} \n" > /dev/tty
+    printf "${yellow}WARNING:${color_reset} ${@} \n" >&3
 }
 
 success_msg() {
-    printf "${green}SUCCESS:${color_reset} ${@} \n" > /dev/tty
+    printf "${green}SUCCESS:${color_reset} ${@} \n" >&3
 }
 
 # Expects 1 argument - number of characters to generate
@@ -380,17 +380,19 @@ wait_for_new_tip () {
     local initial_tip=$(get_current_tip)
     local actual_tip=$(get_current_tip)
     info_msg "Initial Slot Number: $initial_tip"
+    local counter=$timeout_no_of_slots
 
-	local counter=$timeout_no_of_slots
     while (( actual_tip == initial_tip )); do
         sleep $slot_length
-		actual_tip=$(get_current_tip)
-		counter=$((counter - 1))
-		if (( counter < 2 )); then
-			error_msg "Waited for $counter slots but no new block was created"
-			error_msg "Exiting"
-			exit 1
-		fi
+
+        actual_tip=$(get_current_tip)
+		    counter=$((counter - 1))
+
+        if (( counter < 2 )); then
+			      error_msg "Waited for $counter slots but no new block was created"
+			      error_msg "Exiting"
+			      exit 1
+		    fi
     done
     local total_waiting_time=$(( timeout_no_of_slots - counter ))
     info_msg "Waiting for max $timeout_no_of_slots slots. Finished after $((timeout_no_of_slots - counter)) slots"
@@ -1049,6 +1051,5 @@ get_user_number () {
     local user_name=$1
 	echo $user_name | sed 's/[^0-9]*//g'
 }
-
 
 exec "$@"
