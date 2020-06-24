@@ -1,0 +1,7 @@
+TESTNET_MAGIC = "42"
+NODE_SOCKET_PATH = "/root/cardano-node/example/node-pool1/node.sock"
+GENESIS = "genesis.json"
+PROTOCOL_PARAMS = "protocol-params.json"
+USER1_ADDRESS = "0015195ff291b568d13a845673f9835ca4ce36edb1adddfb3ac8d7b43375ae5b2006c8f846c3f489a770cbe0b03f0d78e05787e05022032c671da718d65855cc67"
+USER1_SKEY_FILE_PATH = "/root/cardano-node/example/addresses/user1.skey"
+USER1_VKEY_FILE_PATH = "/root/cardano-node/example/addresses/user1.vkey"
