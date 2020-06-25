@@ -4,7 +4,7 @@ import subprocess
 import os
 from time import sleep
 
-from e2e_scenarios.constants import TESTNET_MAGIC, PROTOCOL_PARAMS, NODE_SOCKET_PATH, USER1_ADDRESS
+from e2e_scenarios.constants import TESTNET_MAGIC, PROTOCOL_PARAMS_FILEPATH, NODE_SOCKET_PATH
 
 
 def delete_folder(location_offline_tx_folder):
@@ -60,7 +60,7 @@ def get_protocol_params():
     try:
         cmd = "cardano-cli shelley query protocol-parameters" \
               " --testnet-magic " + TESTNET_MAGIC + \
-              " --out-file " + PROTOCOL_PARAMS
+              " --out-file " + PROTOCOL_PARAMS_FILEPATH
         return subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
     except subprocess.CalledProcessError as e:
         raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
@@ -149,7 +149,7 @@ def calculate_tx_fee(tx_in_count, tx_out_count, ttl, **options):
           " --tx-in-count " + str(tx_in_count) + \
           " --tx-out-count " + str(tx_out_count) + \
           " --ttl " + str(ttl) + \
-          " --protocol-params-file " + PROTOCOL_PARAMS
+          " --protocol-params-file " + PROTOCOL_PARAMS_FILEPATH
     try:
         if options.get("signing_keys"):
             signing_keys = options.get('signing_keys')
