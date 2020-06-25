@@ -8,7 +8,7 @@ from e2e_scenarios.constants import TESTNET_MAGIC, PROTOCOL_PARAMS_FILEPATH, NOD
 
 
 def delete_folder(location_offline_tx_folder):
-    print(f"=================== Removing the {location_offline_tx_folder} folder...")
+    print(f"====== Removing the {location_offline_tx_folder} folder...")
     if os.path.exists(location_offline_tx_folder) and os.path.isdir(location_offline_tx_folder):
         try:
             shutil.rmtree(location_offline_tx_folder)
@@ -24,11 +24,11 @@ def set_node_socket_path_env_var():
 
 def create_payment_key_pair(location, key_name):
     try:
-        cmd = "cardano-cli shelley address key-gen --verification-key-file " \
-              + location + "/" + key_name \
-              + ".vkey --signing-key-file " \
-              + location + "/" + key_name + ".skey"
-        return subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        cmd = "cardano-cli shelley address key-gen" \
+              " --verification-key-file " + location + "/" + key_name + ".vkey" \
+                                                                        " --signing-key-file " + location + "/" + key_name + ".skey"
+        subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return location + "/" + key_name + ".vkey", location + "/" + key_name + ".skey"
     except subprocess.CalledProcessError as e:
         raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
 
@@ -39,14 +39,16 @@ def build_payment_address(location, addr_name):
               " --payment-verification-key-file " + location + "/" + addr_name + ".vkey" + \
               " --testnet-magic " + TESTNET_MAGIC + \
               " --out-file " + location + "/" + addr_name + ".addr"
-        return subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return read_address_from_file(location, addr_name)
     except subprocess.CalledProcessError as e:
         raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
 
 
 def create_payment_key_pair_and_address(location, addr_name):
-    create_payment_key_pair(location, addr_name)
-    build_payment_address(location, addr_name)
+    addr_vkey, addr_skey = create_payment_key_pair(location, addr_name)
+    addr = build_payment_address(location, addr_name)
+    return addr, addr_vkey, addr_skey
 
 
 def read_address_from_file(location, address_file_name):
@@ -95,15 +97,16 @@ def get_address_utxos(address):
             available_utxos_list.append([utxo_hash, utxo_ix, utxo_amount])
         return available_utxos_list
     except subprocess.CalledProcessError as e:
-        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+        return available_utxos_list
 
 
 def get_address_balance(address):
     address_balance = 0
-    available_utxos_list = get_address_utxos(address)
-    for utxo in available_utxos_list:
-        utxo_amount = utxo[2]
-        address_balance += utxo_amount
+    if get_no_of_utxos_for_address(address) > 0:
+        available_utxos_list = get_address_utxos(address)
+        for utxo in available_utxos_list:
+            utxo_amount = utxo[2]
+            address_balance += utxo_amount
     return address_balance
 
 
@@ -193,6 +196,8 @@ def build_raw_transaction(ttl, fee, **options):
     # tx_in = list of input utxos in this format: (utxo_hash#utxo_ix)
     # tx_out = list of outputs in this format: (address+amount)
 
+    print(f"Building the raw transaction...")
+
     out_file = "tx_raw.body"
 
     cmd = "cardano-cli shelley transaction build-raw" \
@@ -210,15 +215,18 @@ def build_raw_transaction(ttl, fee, **options):
             tx_out_cmd = ''.join([" --tx-out " + tx_out_el for tx_out_el in tx_out])
             cmd = cmd + tx_out_cmd
 
-        subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
-        return out_file
+        result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return [True, out_file, result]
     except subprocess.CalledProcessError as e:
-        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+        print(f"WARNING: command '{e.cmd}' return with error (code {e.returncode}): {' '.join(str(e.output).split())}")
+        return [False, e.output]
 
 
 def sign_raw_transaction(tx_body_file, **options):
     # **options can be: signing_keys
     # signing_keys = list of file paths for the signing keys
+
+    print(f"Signing the raw transaction...")
 
     out_file = "tx_raw.signed"
 
@@ -232,27 +240,31 @@ def sign_raw_transaction(tx_body_file, **options):
             signing_key_cmd = ''.join([" --signing-key-file " + signing_key for signing_key in signing_keys_list])
             cmd = cmd + signing_key_cmd
 
-        subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
-        return out_file
+        result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return [True, out_file, result]
     except subprocess.CalledProcessError as e:
-        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+        print(f"WARNING: command '{e.cmd}' return with error (code {e.returncode}): {e.output}")
+        return [False, e.output]
 
 
 def submit_raw_transaction(tx_file):
+    print(f"Submitting the raw transaction...")
     try:
         cmd = "cardano-cli shelley transaction submit" \
               " --testnet-magic " + TESTNET_MAGIC + \
               " --tx-file " + tx_file
         result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
-        return result
+        return [True, result]
     except subprocess.CalledProcessError as e:
-        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+        print(f"WARNING: command '{e.cmd}' return with error (code {e.returncode}): {e.output}")
+        return [False, e.output]
 
 
 def send_funds(src_address, tx_fee, tx_ttl, **options):
     # **options can be: transferred_amounts, destinations_list, signing_keys
-    global input_utxos_list, transferred_amounts, signing_keys_list
+    input_utxos_list, transferred_amounts, signing_keys_list = [], [], []
     required_funds, change = 0, 0
+    tx_signed_file, tx_body_file = None, None
 
     # get the balance of the source address
     src_addr_balance = get_address_balance(src_address)
@@ -313,7 +325,25 @@ def send_funds(src_address, tx_fee, tx_ttl, **options):
     print(f"src_addr_highest_utxo_amount: {src_addr_highest_utxo_amount}")
     print(f"src_addr_balance: {src_addr_balance}")
 
-    tx_body_file = build_raw_transaction(tx_ttl, tx_fee, tx_in=input_utxos_list_for_tx, tx_out=out_change_list)
-    tx_signed_file = sign_raw_transaction(tx_body_file, signing_keys=signing_keys_list)
-    submit_raw_transaction(tx_signed_file)
+    # build the raw transaction
+    tx_build_result = build_raw_transaction(tx_ttl, tx_fee, tx_in=input_utxos_list_for_tx, tx_out=out_change_list)
+    if not tx_build_result[0]:
+        print(f"ERROR: transaction not successfully builded --> {tx_build_result[2]}")
+        exit(2)
+    else:
+        tx_body_file = tx_build_result[1]
+
+    # sign the raw transaction
+    tx_sign_result = sign_raw_transaction(tx_body_file, signing_keys=signing_keys_list)
+    if not tx_sign_result[0]:
+        print(f"ERROR: transaction not successfully signed --> {tx_sign_result[2]}")
+        exit(2)
+    else:
+        tx_signed_file = tx_sign_result[1]
+
+    # submit the raw transaction
+    tx_submit_result = submit_raw_transaction(tx_signed_file)
+    if not tx_submit_result[0]:
+        print(f"ERROR: transaction not successfully submitted --> {tx_submit_result[1]}")
+        exit(2)
 
