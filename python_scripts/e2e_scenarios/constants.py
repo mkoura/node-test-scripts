@@ -3,7 +3,6 @@ import os
 CWD = os.getcwd()
 
 TESTNET_MAGIC = "42"
-SOCKET_FILE_NAME = "node.sock"
 
 TESTS_ROOT_DIR_NAME = "e2e-tests-directory"
 TESTS_ROOT_DIR_PATH = os.path.join(CWD, TESTS_ROOT_DIR_NAME)
