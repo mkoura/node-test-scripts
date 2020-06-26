@@ -1,3 +1,4 @@
+import json
 import re
 import shutil
 import subprocess
@@ -26,7 +27,7 @@ def create_payment_key_pair(location, key_name):
     try:
         cmd = "cardano-cli shelley address key-gen" \
               " --verification-key-file " + location + "/" + key_name + ".vkey" \
-                                                                        " --signing-key-file " + location + "/" + key_name + ".skey"
+              " --signing-key-file " + location + "/" + key_name + ".skey"
         subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
         return location + "/" + key_name + ".vkey", location + "/" + key_name + ".skey"
     except subprocess.CalledProcessError as e:
@@ -40,7 +41,7 @@ def build_payment_address(location, addr_name):
               " --testnet-magic " + TESTNET_MAGIC + \
               " --out-file " + location + "/" + addr_name + ".addr"
         subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
-        return read_address_from_file(location, addr_name)
+        return read_address_from_file(location, addr_name + ".addr")
     except subprocess.CalledProcessError as e:
         raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
 
@@ -51,8 +52,89 @@ def create_payment_key_pair_and_address(location, addr_name):
     return addr, addr_vkey, addr_skey
 
 
+def create_stake_key_pair(location, key_name):
+    try:
+        cmd = "cardano-cli shelley stake-address key-gen" \
+              " --verification-key-file " + location + "/" + key_name + "_stake.vkey" \
+              " --signing-key-file " + location + "/" + key_name + "_stake.skey"
+        subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return location + "/" + key_name + "_stake.vkey", location + "/" + key_name + "_stake.skey"
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+
+
+def build_stake_address(location, addr_name):
+    try:
+        cmd = "cardano-cli shelley stake-address build" \
+              " --stake-verification-key-file " + location + "/" + addr_name + "_stake.vkey" + \
+              " --testnet-magic " + TESTNET_MAGIC + \
+              " --out-file " + location + "/" + addr_name + "_stake.addr"
+        subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return read_address_from_file(location, addr_name + "_stake.addr")
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+
+
+def delegate_stake_address(stake_addr_skey_file, pool_id ,delegation_fee):
+    try:
+        cmd = "cardano-cli shelley stake-address delegate" \
+              " --signing-key-file " + stake_addr_skey_file + \
+              " --pool-id " + pool_id + \
+              " --delegation-fee " + str(delegation_fee)
+        return subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+
+
+def get_stake_address_info(stake_addr):
+    try:
+        cmd = "cardano-cli shelley query stake-address-info" \
+              " --address " + stake_addr + \
+              " --testnet-magic " + TESTNET_MAGIC
+        output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        output_json = json.loads(output)
+        delegation = output_json[stake_addr]['delegation']
+        rewardAccountBalance = output_json[stake_addr]['rewardAccountBalance']
+        return delegation, rewardAccountBalance
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+
+
+def create_stake_key_pair_and_address(location, addr_name):
+    stake_addr_vkey, stake_addr_skey = create_stake_key_pair(location, addr_name)
+    stake_addr = build_stake_address(location, addr_name)
+    return stake_addr, stake_addr_vkey, stake_addr_skey
+
+
+def create_stake_addr_registration_cert(location, stake_addr_vkey_file, addr_name):
+    try:
+        cmd = "cardano-cli shelley stake-address registration-certificate" \
+              " --stake-verification-key-file " + stake_addr_vkey_file + \
+              " --out-file " + location + "/" + addr_name + "_stake.reg.cert"
+        subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return location + "/" + addr_name + "_stake.reg.cert"
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+
+
+def create_stake_addr_delegation_cert(location, stake_addr_vkey_file, pool_vkey_file ,addr_name):
+    try:
+        cmd = "cardano-cli shelley stake-address delegation-certificate" \
+              " --stake-verification-key-file " + stake_addr_vkey_file + \
+              " --cold-verification-key-file " + pool_vkey_file + \
+              " --out-file " + location + "/" + addr_name + "_stake.deleg.cert"
+        subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return location + "/" + addr_name + "_stake.reg.cert"
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+
+
+
+
+
+
 def read_address_from_file(location, address_file_name):
-    with open(location + "/" + address_file_name + ".addr", 'r') as file:
+    with open(location + "/" + address_file_name, 'r') as file:
         address = file.read().replace('\n', '')
     return address
 
@@ -66,6 +148,14 @@ def get_protocol_params():
         return subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
     except subprocess.CalledProcessError as e:
         raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+
+
+def get_key_deposit():
+    get_protocol_params()
+    with open('protocol-params.json', 'r') as myfile:
+        data = myfile.read()
+    protocol_params = json.loads(data)
+    return protocol_params["keyDeposit"]
 
 
 def get_current_tip():
@@ -215,6 +305,11 @@ def build_raw_transaction(ttl, fee, **options):
             tx_out_cmd = ''.join([" --tx-out " + tx_out_el for tx_out_el in tx_out])
             cmd = cmd + tx_out_cmd
 
+        if options.get("certificates"):
+            certificate_files = options.get('certificates')
+            certificates_cmd = ''.join([" --certificate-file " + cert_file for cert_file in certificate_files])
+            cmd = cmd + certificates_cmd
+
         result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
         return [True, out_file, result]
     except subprocess.CalledProcessError as e:
@@ -261,8 +356,8 @@ def submit_raw_transaction(tx_file):
 
 
 def send_funds(src_address, tx_fee, tx_ttl, **options):
-    # **options can be: transferred_amounts, destinations_list, signing_keys
-    input_utxos_list, transferred_amounts, signing_keys_list = [], [], []
+    # **options can be: transferred_amounts, destinations_list, signing_keys, certificates
+    input_utxos_list, transferred_amounts, signing_keys_list, certificates_list = [], [], [], []
     required_funds, change = 0, 0
     tx_signed_file, tx_body_file = None, None
 
@@ -320,13 +415,17 @@ def send_funds(src_address, tx_fee, tx_ttl, **options):
     if options.get("signing_keys"):
         signing_keys_list = options.get('signing_keys')
 
+    # create the list of transaction certificates
+    if options.get("certificates"):
+        certificates_list = options.get('certificates')
+
     print(f"required_funds: {required_funds}")
     print(f"change: {change}")
     print(f"src_addr_highest_utxo_amount: {src_addr_highest_utxo_amount}")
     print(f"src_addr_balance: {src_addr_balance}")
 
     # build the raw transaction
-    tx_build_result = build_raw_transaction(tx_ttl, tx_fee, tx_in=input_utxos_list_for_tx, tx_out=out_change_list)
+    tx_build_result = build_raw_transaction(tx_ttl, tx_fee, tx_in=input_utxos_list_for_tx, tx_out=out_change_list, certificates=certificates_list)
     if not tx_build_result[0]:
         print(f"ERROR: transaction not successfully builded --> {tx_build_result[2]}")
         exit(2)
