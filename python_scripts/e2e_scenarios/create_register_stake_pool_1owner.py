@@ -30,7 +30,8 @@ from e2e_scenarios.utils import create_payment_key_pair_and_address, calculate_t
 # 10. Step10: crete the owner-delegation.cert in order to meet the pledge requirements
 # 11. Step11: submit 3 certificates through a tx - pool registration, stake address registration, stake address delegation
 # 12. Step12: check that the pool was registered on chain
-# 13. Step13: check the on chain pool details
+# 13. Step13: check that the addr0_stake.addr is delegating to the pool just created and registered on chain
+# 14. Step14: check the on chain pool details
 
 addr_name = "owner"
 node_name = "poolX"
@@ -143,7 +144,14 @@ if stake_pool_id not in list(get_registered_stake_pools_ledger_state().keys()):
 else:
     print(f"{stake_pool_id} is included into the output of ledger_state() command")
 
-print(f"====== Step13: check the on chain pool details for pool id: {stake_pool_id}")
+print(f"====== Step13: check that the addr0_stake.addr is delegating to the pool just created and registered on chain")
+delegation, reward_account_balance = get_stake_address_info(stake_addr)
+
+if delegation != stake_pool_id:
+    print(f"ERROR: address delegation value is different than expected; Expected: {stake_pool_id} vs Returned: {delegation}")
+    exit(2)
+
+print(f"====== Step14: check the on chain pool details for pool id: {stake_pool_id}")
 on_chain_stake_pool_details = get_registered_stake_pools_ledger_state().get(stake_pool_id)
 on_chain_pool_details_errors_list = []
 if on_chain_stake_pool_details['owners'][0] != stake_addr:
