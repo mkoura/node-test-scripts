@@ -148,6 +148,12 @@ def read_address_from_file(location, address_file_name):
     return address
 
 
+def write_to_file(location, content, filename):
+    with open(location + "/" + filename, 'w') as file:
+        file.write(json.dumps(content))
+    return location + "/" + filename
+
+
 def get_protocol_params():
     set_node_socket_path_env_var()
     try:
@@ -566,20 +572,37 @@ def gen_node_operational_cert(node_kes_vkey_file, node_cold_skey_file, node_cold
                                                                                  ' '.join(str(e.output).split())))
 
 
-def gen_pool_registration_cert(pool_pledge, pool_cost, pool_margin, node_vrf_vkey_file, node_cold_vkey_file,
-                               owner_stake_addr_vkey_file, location, node_name):
-    suffix_str = "_pool_reg.cert"
+def gen_pool_metadata_hash(pool_metadata_file):
     try:
-        cmd = "cardano-cli shelley stake-pool registration-certificate" + \
-              " --pool-pledge " + str(pool_pledge) + \
-              " --pool-cost " + str(pool_cost) + \
-              " --pool-margin " + str(pool_margin) + \
-              " --vrf-verification-key-file " + node_vrf_vkey_file + \
-              " --stake-pool-verification-key-file " + node_cold_vkey_file + \
-              " --reward-account-verification-key-file " + owner_stake_addr_vkey_file + \
-              " --pool-owner-staking-verification-key " + owner_stake_addr_vkey_file + \
-              " --testnet-magic " + TESTNET_MAGIC + \
-              " --out-file " + location + "/" + node_name + suffix_str
+        cmd = "cardano-cli shelley stake-pool metadata-hash" + \
+              " --pool-metadata-file " + pool_metadata_file
+        metadata_hash = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return metadata_hash
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode,
+                                                                                 ' '.join(str(e.output).split())))
+
+
+def gen_pool_registration_cert(pool_pledge, pool_cost, pool_margin, node_vrf_vkey_file, node_cold_vkey_file,
+                               owner_stake_addr_vkey_file, location, node_name, **options):
+    suffix_str = "_pool_reg.cert"
+    cmd = "cardano-cli shelley stake-pool registration-certificate" + \
+          " --pool-pledge " + str(pool_pledge) + \
+          " --pool-cost " + str(pool_cost) + \
+          " --pool-margin " + str(pool_margin) + \
+          " --vrf-verification-key-file " + node_vrf_vkey_file + \
+          " --stake-pool-verification-key-file " + node_cold_vkey_file + \
+          " --reward-account-verification-key-file " + owner_stake_addr_vkey_file + \
+          " --pool-owner-staking-verification-key " + owner_stake_addr_vkey_file + \
+          " --testnet-magic " + TESTNET_MAGIC + \
+          " --out-file " + location + "/" + node_name + suffix_str
+    try:
+        # pool_metadata is a list of: [pool_metadata_url, pool_metadata_hash]
+        if options.get("pool_metadata"):
+            pool_metadata_url = options.get('pool_metadata')[0]
+            pool_metadata_hash = options.get('pool_metadata')[1]
+            pool_metadata_cmd = " --metadata-url " + pool_metadata_url + " --metadata-hash " + pool_metadata_hash
+            cmd = cmd + pool_metadata_cmd
         subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
         return location + "/" + node_name + suffix_str
     except subprocess.CalledProcessError as e:
