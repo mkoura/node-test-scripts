@@ -549,6 +549,7 @@ def get_actual_kes_period():
 
 
 def gen_node_operational_cert(node_kes_vkey_file, node_cold_skey_file, node_cold_counter_file, location, node_name):
+    # this certificate is used when starting the node and not submitted throw a tx
     current_kes_period = get_actual_kes_period()
     suffix_str = ".opcert"
     try:

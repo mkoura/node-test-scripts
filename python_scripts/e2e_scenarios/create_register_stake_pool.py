@@ -25,11 +25,12 @@ from e2e_scenarios.utils import create_payment_key_pair_and_address, calculate_t
 # 5. Step5: create the KES key pair
 # 6. Step6: create the VRF key pair
 # 7. Step7: create the cold key pair and node operational certificate counter
-# 8. Step8: create the node operational certificate
+# 8. Step8: create the node operational certificate (used when starting the pool)
 # 9. Step9: create the stake pool registration certificate
 # 10. Step10: crete the owner-delegation.cert in order to meet the pledge requirements
-# 11. Step11: submit all 4 certificates through a tx
-# 12. Step12: check that the pool was registered
+# 11. Step11: submit 3 certificates through a tx - pool registration, stake address registration, stake address delegation
+# 12. Step12: check that the pool was registered on chain
+# 13. Step13: check the on chain pool details
 
 addr_name = "owner"
 node_name = "poolX"
@@ -95,7 +96,7 @@ print(f"====== Step7: create the cold key pair and node operational certificate 
 node_cold_vkey_file, node_cold_skey_file, node_cold_counter_file = gen_cold_key_pair_and_counter(tmp_directory_for_script_files, node_name)
 print(f"Cold keys created and counter created - {node_cold_vkey_file}; {node_cold_skey_file}; {node_cold_counter_file}")
 
-print(f"====== Step8: create the node operational certificate")
+print(f"====== Step8: create the node operational certificate (used when starting the pool)")
 kes_period = get_actual_kes_period()
 node_opcert_file = gen_node_operational_cert(node_kes_vkey_file, node_cold_skey_file, node_cold_counter_file,
                                              tmp_directory_for_script_files, node_name)
@@ -112,9 +113,10 @@ stake_addr_delegation_cert_file = create_stake_addr_delegation_cert(tmp_director
                                                                     node_cold_vkey_file, addr_name)
 print(f"Stake pool owner-delegation certificate created - {stake_addr_delegation_cert_file}")
 
-print(f"====== Step11: submit all the certificates through a tx")
+print(f"====== Step11: submit 3 certificates through a tx - pool registration, stake address registration, "
+      f"stake address delegation")
 src_address = addr
-certificates_list = [node_opcert_file, pool_reg_cert_file, stake_addr_reg_cert_file, stake_addr_delegation_cert_file]
+certificates_list = [pool_reg_cert_file, stake_addr_reg_cert_file, stake_addr_delegation_cert_file]
 signing_keys_list = [addr_skey_file, stake_addr_skey_file, node_cold_skey_file]
 
 tx_ttl = calculate_tx_ttl()
@@ -132,13 +134,45 @@ wait_for_new_tip()
 print(f"Check that the balance for source address was correctly updated")
 assert_address_balance(src_address, src_add_balance_init - tx_fee)
 
-print(f"====== Step12: check that the pool was registered")
 stake_pool_id = get_stake_pool_id(node_cold_vkey_file)
+print(f"====== Step12: check that the pool was registered on chain; pool id: {stake_pool_id}")
 if stake_pool_id not in list(get_registered_stake_pools_ledger_state().keys()):
     print(f"ERROR: newly created stake pool id is not shown inside the available stake pools; "
           f"\n\t- Pool ID: {stake_pool_id} vs Existing IDs: {list(get_registered_stake_pools_ledger_state().keys())}")
     exit(2)
+else:
+    print(f"{stake_pool_id} is included into the output of ledger_state() command")
 
+print(f"====== Step13: check the on chain pool details for pool id: {stake_pool_id}")
 on_chain_stake_pool_details = get_registered_stake_pools_ledger_state().get(stake_pool_id)
+on_chain_pool_details_errors_list = []
+if on_chain_stake_pool_details['owners'][0] != stake_addr:
+    on_chain_pool_details_errors_list.append(f"'owner' value is different than expected; "
+                                             f"Expected: {stake_addr} vs Returned: {on_chain_stake_pool_details['owners'][0]}")
 
-print(f"on_chain_stake_pool_details: {on_chain_stake_pool_details}")
+if on_chain_stake_pool_details['cost'] != pool_cost:
+    on_chain_pool_details_errors_list.append(f"'cost' value is different than expected; "
+                                             f"Expected: {pool_cost} vs Returned: {on_chain_stake_pool_details['cost']}")
+
+if on_chain_stake_pool_details['margin'] != pool_margin:
+    on_chain_pool_details_errors_list.append(f"'margin' value is different than expected; "
+                                             f"Expected: {pool_margin} vs Returned: {on_chain_stake_pool_details['margin']}")
+
+if on_chain_stake_pool_details['pledge'] != pool_pledge:
+    on_chain_pool_details_errors_list.append(f"'pledge' value is different than expected; "
+                                             f"Expected: {pool_pledge} vs Returned: {on_chain_stake_pool_details['pledge']}")
+
+if on_chain_stake_pool_details['metadata'] is not None:
+    on_chain_pool_details_errors_list.append(f"'metadata' value is different than expected; "
+                                             f"Expected: None vs Returned: {on_chain_stake_pool_details['metadata']}")
+
+if on_chain_stake_pool_details['relays'] != []:
+    on_chain_pool_details_errors_list.append(f"'relays' value is different than expected; "
+                                             f"Expected: [] vs Returned: {on_chain_stake_pool_details['relays']}")
+
+if len(on_chain_pool_details_errors_list) > 0:
+    print(f"{len(on_chain_pool_details_errors_list)} pool parameter(s) have different values on chain than expected:")
+    for er in on_chain_pool_details_errors_list:
+        print(f"\tERROR: {er}")
+else:
+    print(f"All pool details were correctly registered on chain for {stake_pool_id} - {on_chain_stake_pool_details}")
