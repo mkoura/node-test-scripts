@@ -12,9 +12,8 @@ from e2e_scenarios.constants import USER1_ADDRESS, USER1_SKEY_FILE_PATH
 from e2e_scenarios.utils import create_payment_key_pair_and_address, calculate_tx_fee, calculate_tx_ttl, send_funds, \
     get_address_balance, wait_for_new_tip, assert_address_balance, create_stake_key_pair_and_address, \
     create_stake_addr_registration_cert, get_key_deposit, get_pool_deposit, get_registered_stake_pools_ledger_state, \
-    create_and_register_stake_pool, write_to_file, gen_pool_metadata_hash, gen_pool_deregistration_cert, \
-    get_current_epoch_no, wait_for_new_epoch, get_stake_distribution, create_stake_addr_delegation_cert, \
-    deregister_stake_pool
+    create_and_register_stake_pool, write_to_file, gen_pool_metadata_hash, create_stake_addr_delegation_cert, \
+    register_stake_pool, wait_for_new_epoch
 
 # Scenario
 # 1. Step1: create 1 new payment key pair and addresses (addr0.addr)
@@ -26,15 +25,18 @@ from e2e_scenarios.utils import create_payment_key_pair_and_address, calculate_t
 # 7. Step7: create 1 stake addresses delegation certificate in order to meet the pledge requirements
 # 8. Step8: submit the 2 certificates through a tx - stake address registration, stake address delegation
 # 9. Step9: check that the pool was registered on chain
-# 10. Step10: wait for the pool id to be shown into the stake-distribution (2 epochs)
-# 11. Step11: create and send through a tx a pool deregistration certificate and submit it (starting next epoch)
-# 12. Step12: wait for the next epoch and check that the pool is no longer registered
+# 10. Step10: update the pool parameters by resubmitting the pool registration certificate
+# TO DO: updating the pool parameters might cost less than pool registration (to validate this)
+# 11. Step11: wait_for_new_epoch and check that the pool parameters were correctly updated on chain
 
 addr_name = "owner"
-node_name = "poolZ"
-pool_pledge = 222
-pool_cost = 123
-pool_margin = 0.512
+node_name = "poolA"
+pool_pledge = 4567
+pool_cost = 3
+pool_margin = 0.01
+pool_pledge_updated = 1
+pool_cost_updated = 1000000
+pool_margin_updated = 0.9
 
 pool_metadata = {
     "name": "QA E2E test",
@@ -135,37 +137,76 @@ if stake_pool_id not in list(get_registered_stake_pools_ledger_state().keys()):
 else:
     print(f"{stake_pool_id} is included into the output of ledger_state() command")
 
-print(f"====== Step10: wait for the pool id to be shown into the stake-distribution")
-# the pool_id should be included into the stake distribution of epoch {current_epoch + 2}
-current_epoch = get_current_epoch_no()
-expected_epoch = current_epoch + 2
+on_chain_stake_pool_details = get_registered_stake_pools_ledger_state().get(stake_pool_id)
+on_chain_pool_details_errors_list = []
+if on_chain_stake_pool_details['owners'][0] not in stake_addr:
+    on_chain_pool_details_errors_list.append(f"'owner' value is different than expected; "
+                                             f"Expected: {stake_addr} vs Returned: {on_chain_stake_pool_details['owners'][0]}")
 
-while current_epoch != expected_epoch:
-    wait_for_new_epoch()
-    current_epoch = get_current_epoch_no()
-    if stake_pool_id not in get_stake_distribution():
-        print(f"{stake_pool_id} was NOT included into the stake distribution of epoch {current_epoch}")
-        if current_epoch == expected_epoch:
-            print(f"ERROR: {stake_pool_id} was NOT included into the stake distribution of epoch {current_epoch}")
-    else:
-        print(f"OK: {stake_pool_id} was included into the stake distribution of epoch {current_epoch}")
+if on_chain_stake_pool_details['cost'] != pool_cost:
+    on_chain_pool_details_errors_list.append(f"'cost' value is different than expected; "
+                                             f"Expected: {pool_cost} vs Returned: {on_chain_stake_pool_details['cost']}")
 
-print(f"====== Step11: create and send through a tx a pool deregistration certificate and submit it")
-current_epoch = get_current_epoch_no()
-deregister_stake_pool(pool_owner, node_cold_vkey_file, node_cold_skey_file, current_epoch + 1,
-                      tmp_directory_for_script_files, node_name)
+if on_chain_stake_pool_details['margin'] != pool_margin:
+    on_chain_pool_details_errors_list.append(f"'margin' value is different than expected; "
+                                             f"Expected: {pool_margin} vs Returned: {on_chain_stake_pool_details['margin']}")
 
-print(f"====== Step12: wait for the pool id to NOT be shown into the stake-distribution anymore")
-# the pool_id should not be included into the stake distribution of epoch {current_epoch + 3} - deregistration_epoch + 2
-current_epoch = get_current_epoch_no()
-expected_epoch = current_epoch + 3
+if on_chain_stake_pool_details['pledge'] != pool_pledge:
+    on_chain_pool_details_errors_list.append(f"'pledge' value is different than expected; "
+                                             f"Expected: {pool_pledge} vs Returned: {on_chain_stake_pool_details['pledge']}")
 
-while current_epoch != expected_epoch:
-    wait_for_new_epoch()
-    current_epoch = get_current_epoch_no()
-    if stake_pool_id in get_stake_distribution():
-        print(f"{stake_pool_id} was included into the stake distribution of epoch {current_epoch}")
-        if current_epoch == expected_epoch:
-            print(f"ERROR: {stake_pool_id} was STILL included into the stake distribution of epoch {current_epoch}")
-    else:
-        print(f"OK: {stake_pool_id} was NOT included into the stake distribution of epoch {current_epoch}")
+if on_chain_stake_pool_details['metadata'] is None:
+    on_chain_pool_details_errors_list.append(f"'metadata' value is different than expected; "
+                                             f"Expected: None vs Returned: {on_chain_stake_pool_details['metadata']}")
+
+if on_chain_stake_pool_details['relays'] != []:
+    on_chain_pool_details_errors_list.append(f"'relays' value is different than expected; "
+                                             f"Expected: [] vs Returned: {on_chain_stake_pool_details['relays']}")
+
+if len(on_chain_pool_details_errors_list) > 0:
+    print(f"{len(on_chain_pool_details_errors_list)} pool parameter(s) have different values on chain than expected:")
+    for er in on_chain_pool_details_errors_list:
+        print(f"\tERROR: {er}")
+else:
+    print(f"All pool details were correctly registered on chain for {stake_pool_id} - {on_chain_stake_pool_details}")
+
+print(f"====== Step10: update the pool parameters by resubmitting the pool registration certificate")
+pool_reg_cert_file = register_stake_pool(pool_owner, pool_pledge_updated, pool_cost_updated, pool_margin_updated,
+                                         node_vrf_vkey_file, node_cold_vkey_file, node_cold_skey_file,
+                                         tmp_directory_for_script_files, node_name,
+                                         pool_metadata=[pool_metadata_url, pool_metadata_hash])
+
+print(f"====== Step11: wait_for_new_epoch and check that the pool parameters were correctly updated on chain for pool id: {stake_pool_id}")
+wait_for_new_epoch()
+on_chain_stake_pool_details = get_registered_stake_pools_ledger_state().get(stake_pool_id)
+on_chain_pool_details_errors_list = []
+if on_chain_stake_pool_details['owners'][0] not in stake_addr:
+    on_chain_pool_details_errors_list.append(f"'owner' value is different than expected; "
+                                             f"Expected: {stake_addr} vs Returned: {on_chain_stake_pool_details['owners'][0]}")
+
+if on_chain_stake_pool_details['cost'] != pool_cost_updated:
+    on_chain_pool_details_errors_list.append(f"'cost' value is different than expected; "
+                                             f"Expected: {pool_cost_updated} vs Returned: {on_chain_stake_pool_details['cost']}")
+
+if on_chain_stake_pool_details['margin'] != pool_margin_updated:
+    on_chain_pool_details_errors_list.append(f"'margin' value is different than expected; "
+                                             f"Expected: {pool_margin_updated} vs Returned: {on_chain_stake_pool_details['margin']}")
+
+if on_chain_stake_pool_details['pledge'] != pool_pledge_updated:
+    on_chain_pool_details_errors_list.append(f"'pledge' value is different than expected; "
+                                             f"Expected: {pool_pledge_updated} vs Returned: {on_chain_stake_pool_details['pledge']}")
+
+if on_chain_stake_pool_details['metadata'] is None:
+    on_chain_pool_details_errors_list.append(f"'metadata' value is different than expected; "
+                                             f"Expected: None vs Returned: {on_chain_stake_pool_details['metadata']}")
+
+if on_chain_stake_pool_details['relays'] != []:
+    on_chain_pool_details_errors_list.append(f"'relays' value is different than expected; "
+                                             f"Expected: [] vs Returned: {on_chain_stake_pool_details['relays']}")
+
+if len(on_chain_pool_details_errors_list) > 0:
+    print(f"{len(on_chain_pool_details_errors_list)} pool parameter(s) have different values on chain than expected:")
+    for er in on_chain_pool_details_errors_list:
+        print(f"\tERROR: {er}")
+else:
+    print(f"All pool details were correctly registered on chain for {stake_pool_id} - {on_chain_stake_pool_details}")

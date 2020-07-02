@@ -709,6 +709,19 @@ def create_and_register_stake_pool(location, pool_name, pool_pledge, pool_cost, 
     if options.get("pool_metadata"):
         # pool_metadata is a list of: [pool_metadata_url, pool_metadata_hash]
         pool_metadata = options.get("pool_metadata")
+
+    register_stake_pool(pool_owner, pool_pledge, pool_cost, pool_margin, node_vrf_vkey_file, node_cold_vkey_file,
+                        node_cold_skey_file, location, pool_name, pool_metadata)
+
+    stake_pool_id = get_stake_pool_id(node_cold_vkey_file)
+    return stake_pool_id, node_cold_vkey_file, node_cold_skey_file, node_vrf_vkey_file
+
+
+def register_stake_pool(pool_owner, pool_pledge, pool_cost, pool_margin, node_vrf_vkey_file, node_cold_vkey_file,
+                        node_cold_skey_file, location, pool_name, pool_metadata=None):
+    # pool_owner = [addr, addr_vkey_file, addr_skey_file, stake_addr, stake_addr_vkey_file, stake_addr_skey_file]
+    if pool_metadata is None:
+        pool_metadata = []
     pool_reg_cert_file = gen_pool_registration_cert(pool_pledge, pool_cost, pool_margin, node_vrf_vkey_file,
                                                     node_cold_vkey_file, pool_owner[4],
                                                     location, pool_name, pool_metadata=pool_metadata)
@@ -724,9 +737,7 @@ def create_and_register_stake_pool(location, pool_name, pool_pledge, pool_cost, 
 
     wait_for_new_tip()
     wait_for_new_tip()
-
-    stake_pool_id = get_stake_pool_id(node_cold_vkey_file)
-    return stake_pool_id, node_cold_vkey_file, node_cold_skey_file
+    return pool_reg_cert_file
 
 
 def deregister_stake_pool(pool_owner, node_cold_vkey_file, node_cold_skey_file, epoch_no, location, pool_name):
