@@ -215,6 +215,12 @@ def get_current_tip():
                                                                                  ' '.join(str(e.output).split())))
 
 
+def get_current_epoch_no():
+    current_epoch_no = get_current_tip()
+    epoch_length = get_epoch_length()
+    return int(current_epoch_no / epoch_length)
+
+
 def get_address_utxos(address):
     # this will create a list of utxos in this format: ['utxo_hash', utxo_ix, utxo_amount]
     set_node_socket_path_env_var()
@@ -283,7 +289,7 @@ def calculate_tx_ttl():
 
 
 def calculate_tx_fee(tx_in_count, tx_out_count, ttl, **options):
-    # **options can be: signing_keys, certificates, withdrawal, has-metadata
+    # **options can be: signing_keys, certificates, withdrawal, has_metadata
     get_protocol_params()
     cmd = "cardano-cli shelley transaction calculate-min-fee" \
           " --testnet-magic " + TESTNET_MAGIC + \
@@ -300,6 +306,8 @@ def calculate_tx_fee(tx_in_count, tx_out_count, ttl, **options):
             certificates = options.get('certificates')
             certificates_cmd = ''.join([" --certificate " + cert for cert in certificates])
             cmd = cmd + certificates_cmd
+        if options.get("has_metadata"):
+            cmd = cmd + " --has-metadata "
         result = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
         return int(result.split(': ')[1])
     except subprocess.CalledProcessError as e:
@@ -309,8 +317,14 @@ def calculate_tx_fee(tx_in_count, tx_out_count, ttl, **options):
 
 def get_slot_length():
     # TO DO: take this value from genesis; first define where genesis will be located
-    slot_length = 1
+    slot_length = 0.2
     return slot_length
+
+
+def get_epoch_length():
+    # TO DO: take this value from genesis; first define where genesis will be located
+    epoch_length = 1500
+    return epoch_length
 
 
 def get_slots_per_kes_period():
@@ -342,8 +356,31 @@ def wait_for_new_tip():
     print(f"New block was created; slot number: {current_tip}")
 
 
+def wait_for_new_epoch(no_of_epochs_to_wait=1):
+    slot_length = get_slot_length()
+    epoch_length = get_epoch_length()
+    current_slot_no = get_current_tip()
+    current_epoch_no = get_current_epoch_no()
+    print(f"Current epoch: {current_epoch_no}; Waiting the beginning of epoch: {current_epoch_no + no_of_epochs_to_wait}")
+
+    timeout_no_of_epochs = no_of_epochs_to_wait + 1
+    expected_epoch_no = current_epoch_no + no_of_epochs_to_wait
+
+    while current_epoch_no != expected_epoch_no:
+        sleep_slots = (current_epoch_no + 1) * epoch_length - current_slot_no
+        sleep_time = int(sleep_slots * slot_length) + 1
+        sleep(sleep_time)
+        current_epoch_no = get_current_epoch_no()
+        current_slot_no = get_current_tip()
+        timeout_no_of_epochs -= 1
+        if timeout_no_of_epochs < 1:
+            print(f"ERROR: Waited for {no_of_epochs_to_wait + 1} epochs and expected epoch no is not present")
+            exit(2)
+    print(f"Expected epoch started; epoch number: {current_epoch_no}")
+
+
 def build_raw_transaction(ttl, fee, **options):
-    # **options can be: tx_in, tx_out, certificates, withdrawal, metadata-file, update-proposal-file
+    # **options can be: tx_in, tx_out, certificates, withdrawal, metadata_file, update_proposal_file
     # tx_in = list of input utxos in this format: (utxo_hash#utxo_ix)
     # tx_out = list of outputs in this format: (address+amount)
     print(f"Building the raw transaction...")
@@ -591,18 +628,32 @@ def gen_pool_registration_cert(pool_pledge, pool_cost, pool_margin, node_vrf_vke
           " --pool-cost " + str(pool_cost) + \
           " --pool-margin " + str(pool_margin) + \
           " --vrf-verification-key-file " + node_vrf_vkey_file + \
-          " --stake-pool-verification-key-file " + node_cold_vkey_file + \
-          " --reward-account-verification-key-file " + owner_stake_addr_vkey_file + \
-          " --pool-owner-staking-verification-key " + owner_stake_addr_vkey_file + \
+          " --cold-verification-key-file " + node_cold_vkey_file + \
+          " --pool-reward-account-verification-key-file " + owner_stake_addr_vkey_file + \
+          " --pool-owner-stake-verification-key-file " + owner_stake_addr_vkey_file + \
           " --testnet-magic " + TESTNET_MAGIC + \
           " --out-file " + location + "/" + node_name + suffix_str
     try:
         # pool_metadata is a list of: [pool_metadata_url, pool_metadata_hash]
-        if options.get("pool_metadata"):
+        if options.get("pool_metadata") and len(options.get("pool_metadata")) == 2:
             pool_metadata_url = options.get('pool_metadata')[0]
             pool_metadata_hash = options.get('pool_metadata')[1]
             pool_metadata_cmd = " --metadata-url " + pool_metadata_url + " --metadata-hash " + pool_metadata_hash
             cmd = cmd + pool_metadata_cmd
+        subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return location + "/" + node_name + suffix_str
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode,
+                                                                                 ' '.join(str(e.output).split())))
+
+
+def gen_pool_deregistration_cert(cold_verification_key_file, epoch_no, location, node_name):
+    suffix_str = "_pool_dereg.cert"
+    cmd = "cardano-cli shelley stake-pool deregistration-certificate" + \
+          " --cold-verification-key-file " + cold_verification_key_file + \
+          " --epoch " + str(epoch_no) + \
+          " --out-file " + location + "/" + node_name + suffix_str
+    try:
         subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8").strip()
         return location + "/" + node_name + suffix_str
     except subprocess.CalledProcessError as e:
@@ -638,3 +689,60 @@ def get_stake_pool_id(pool_cold_vkey_file):
     except subprocess.CalledProcessError as e:
         raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode,
                                                                                  ' '.join(str(e.output).split())))
+
+
+def create_and_register_stake_pool(location, pool_name, pool_pledge, pool_cost, pool_margin, pool_owner, **options):
+    # pool_owner = [addr, addr_vkey_file, addr_skey_file, stake_addr, stake_addr_vkey_file, stake_addr_skey_file]
+    # create the KES key pair
+    node_kes_vkey_file, node_kes_skey_file = gen_kes_key_pair(location, pool_name)
+    print(f"KES keys created - {node_kes_vkey_file}; {node_kes_skey_file}")
+
+    # create the VRF key pair
+    node_vrf_vkey_file, node_vrf_skey_file = gen_vrf_key_pair(location, pool_name)
+    print(f"VRF keys created - {node_vrf_vkey_file}; {node_vrf_skey_file}")
+
+    # create the cold key pair and node operational certificate counter
+    node_cold_vkey_file, node_cold_skey_file, node_cold_counter_file = gen_cold_key_pair_and_counter(location, pool_name)
+    print(f"Cold keys created and counter created - {node_cold_vkey_file}; {node_cold_skey_file}; {node_cold_counter_file}")
+    # create the stake pool registration certificate
+    pool_metadata = []
+    if options.get("pool_metadata"):
+        # pool_metadata is a list of: [pool_metadata_url, pool_metadata_hash]
+        pool_metadata = options.get("pool_metadata")
+    pool_reg_cert_file = gen_pool_registration_cert(pool_pledge, pool_cost, pool_margin, node_vrf_vkey_file,
+                                                    node_cold_vkey_file, pool_owner[4],
+                                                    location, pool_name, pool_metadata=pool_metadata)
+
+    # submit the pool registration certificate through a tx
+    tx_ttl = calculate_tx_ttl()
+    signing_keys_list = [pool_owner[2], pool_owner[5], node_cold_skey_file]
+    tx_fee = calculate_tx_fee(1, 1, tx_ttl, certificates=[pool_reg_cert_file], signing_keys=signing_keys_list)
+    pool_deposit = get_pool_deposit()
+    send_funds(pool_owner[0], tx_fee + pool_deposit, tx_ttl,
+               certificates=[pool_reg_cert_file],
+               signing_keys=signing_keys_list)
+
+    wait_for_new_tip()
+    wait_for_new_tip()
+
+    stake_pool_id = get_stake_pool_id(node_cold_vkey_file)
+    return stake_pool_id, node_cold_vkey_file, node_cold_skey_file
+
+
+def deregister_stake_pool(pool_owner, node_cold_vkey_file, node_cold_skey_file, epoch_no, location, pool_name):
+    # the pool will be deregistered in pool {epoch_no} but it will take effect after 2 epochs {epoch_no + 2}
+    # pool_owner = [addr, addr_vkey_file, addr_skey_file, stake_addr, stake_addr_vkey_file, stake_addr_skey_file]
+    print(f"Deregistering stake pool starting with epoch: {epoch_no}; Current epoch is: {get_current_epoch_no()}")
+    pool_dereg_cert_file = gen_pool_deregistration_cert(node_cold_vkey_file, epoch_no,
+                                                        location, pool_name)
+
+    # submit the pool deregistration certificate through a tx
+    tx_ttl = calculate_tx_ttl()
+    signing_keys_list = [pool_owner[2], pool_owner[5], node_cold_skey_file]
+    tx_fee = calculate_tx_fee(1, 1, tx_ttl, certificates=[pool_dereg_cert_file], signing_keys=signing_keys_list)
+    send_funds(pool_owner[0], tx_fee, tx_ttl,
+               certificates=[pool_dereg_cert_file],
+               signing_keys=signing_keys_list)
+
+    wait_for_new_tip()
+    wait_for_new_tip()

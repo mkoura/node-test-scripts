@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-#!/usr/bin/env python2
 
 import os, sys
 from pathlib import Path
